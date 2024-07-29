@@ -40,8 +40,8 @@ var configFile string
 var discordWebhookURL string
 
 var scanCmd = &cobra.Command{
-	Use:   "scan [repository]",
-	Short: "Scan a Git repository for secrets",
+	Use:   "run [repository]",
+	Short: "Run the scan in a Git repository for secrets",
 	Args:  cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		repoPath := args[0]
