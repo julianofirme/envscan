@@ -1,0 +1,10 @@
+stages:
+  - scan
+
+envscan_job:
+  stage: scan
+  image: golang:latest
+  before_script:
+    - go get -v ./...
+  script:
+    - envscan scan $CI_PROJECT_DIR --config secret-patterns.toml --discord-webhook ${{ secrets.DISCORD_WEBHOOK_URL }}
