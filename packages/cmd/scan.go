@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -143,7 +145,7 @@ func scanRepository(repoPath string, config Config) {
 		generateReport(matches, "json")
 
 		if discordWebhookURL != "" {
-			err := service.sendDiscordNotification(discordWebhookURL, "Secrets found in repository")
+			err := sendDiscordNotification(discordWebhookURL, "Secrets found in repository")
 			if err != nil {
 				fmt.Printf("Error sending Discord notification: %v\n", err)
 			}
@@ -178,4 +180,24 @@ func generateReport(matches []string, format string) error {
 	}
 
 	return os.WriteFile(filepath.Join("reports", fmt.Sprintf("report_%d.%s", time.Now().Unix(), format)), output, 0644)
+}
+
+func sendDiscordNotification(webhookURL, content string) error {
+	message := map[string]string{"content": content}
+	messageBytes, err := json.Marshal(message)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(webhookURL, "application/json", bytes.NewBuffer(messageBytes))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("failed to send notification: %s", resp.Status)
+	}
+
+	return nil
 }
