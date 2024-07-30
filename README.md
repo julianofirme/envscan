@@ -7,7 +7,7 @@ EnvScan is a tool for scanning Git repositories for secrets and sensitive variab
 To install EnvScan, use the provided installation script:
 
 ```bash
-curl -s https://raw.githubusercontent.com/jfirme-sys/envscan/main/install.sh | bash
+curl -s https://raw.githubusercontent.com/julianofirme/envscan/main/install.sh | bash
 ```
 
 ## Usage
@@ -16,7 +16,7 @@ To scan a repository and optionally send results to a Discord webhook, follow th
 
 1. Download the configuration file:
 ```bash
-curl -o secrets.toml https://raw.githubusercontent.com/jfirme-sys/envscan/main/secrets.toml
+curl -o secrets.toml https://raw.githubusercontent.com/julianofirme/envscan/main/secrets.toml
 ```
 
 2. Run the scan:
