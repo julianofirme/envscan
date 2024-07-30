@@ -32,7 +32,7 @@ Create a Discord Webhook URL. Refer to Discord's documentation for instructions.
 Use the webhook URL with the -d flag when running envscan:
 
 ```bash
-envscan scan /path/to/your/repository -c /path/to/secret-patterns.toml -d https://discord.com/api/webhooks/your_webhook_id
+envscan run /path/to/your/repository -c /path/to/secret-patterns.toml -d https://discord.com/api/webhooks/your_webhook_id
 ```
 
 ## Flags
