@@ -1,6 +1,6 @@
 #!/bin/bash
 
-REPO="jfirme-sys/envscan"
+REPO="julianofirme/envscan"
 LATEST_RELEASE=$(curl -s https://api.github.com/repos/$REPO/releases/latest | grep "tag_name" | awk '{print substr($2, 2, length($2)-3) }')
 OS=$(uname -s)
 ARCH=$(uname -m)
