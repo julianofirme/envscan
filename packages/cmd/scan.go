@@ -148,9 +148,9 @@ func scanDirectory(dirPath string, cfg config.Config) {
 			rules = append(rules, re)
 		}
 		for scanner.Scan() {
-			line := scanner.Text()
+			line := scanner.Bytes()
 			for _, rule := range rules {
-				if rule.MatchString(line) {
+				if rule.Match(line) {
 					matches = append(matches, fmt.Sprintf("Potential secret found in file %s: %s", path, line))
 				}
 			}
