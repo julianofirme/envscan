@@ -1,8 +1,13 @@
-help:
-	@echo "Usage:"
-	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ":" | sed -e 's/^/  /'
+build:
+	go build -o bin/envscan main.go
 
-## build-cli: build the cli application
-.PHONY: build-cli
-build-cli:
-	go build -o env ./main.go
+run:
+	go run main.go
+
+compile:
+	echo "Compiling for every OS and Platform"
+	GOOS=windows GOARCH=amd64 go build -o bin/envscan-windows.exe main.go
+	GOOS=darwin GOARCH=amd64 go build -o bin/envscan-darwin main.go
+	GOOS=linux GOARCH=amd64 go build -o bin/envscan main.go
+
+all: hello build
