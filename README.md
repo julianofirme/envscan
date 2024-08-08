@@ -1,10 +1,10 @@
 # envscan
 
-EnvScan is a tool for scanning Git repositories for secrets and sensitive variables, helping you prevent leaks and maintain security.
+EnvScan is a tool for scanning projects for secrets and sensitive variables, helping you prevent leaks and maintain security.
 
 ## Installation
 
-To install EnvScan, use the provided installation script:
+To install Envscan, use the provided installation script:
 
 ```bash
 curl -s https://raw.githubusercontent.com/julianofirme/envscan/main/install.sh | bash
@@ -40,7 +40,7 @@ envscan run /path/to/your/repository -c /path/to/secret-patterns.toml -d https:/
 - -d: (Optional) Specifies the Discord webhook URL for sending notifications of found secrets (e.g., -d https://discord.com/api/webhooks/your_webhook_id).
 
 ## Adding Custom Rules
-You can add custom rules by editing the secret-patterns.toml file. Each rule must have a description, id, regex, secretGroup, and keywords.
+You can add custom rules by editing the secrets.toml file. Each rule must have a description, id, regex, secretGroup, and keywords.
 
 ## Contributing
 
