@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/pelletier/go-toml"
 	"github.com/spf13/cobra"
 )
@@ -50,7 +48,7 @@ var scanCmd = &cobra.Command{
 			fmt.Printf("Error loading config: %v\n", err)
 			os.Exit(1)
 		}
-		scanRepository(repoPath, config)
+		scanDirectory(repoPath, config)
 	},
 }
 
@@ -70,70 +68,44 @@ func loadConfig(filePath string) (Config, error) {
 	return config, err
 }
 
-func shouldIgnore(file string, config Config) bool {
-	for _, ignoreFile := range config.Ignore.Files {
-		if file == ignoreFile {
-			return true
-		}
-	}
-	for _, ignoreDir := range config.Ignore.Directories {
-		if strings.HasPrefix(file, ignoreDir) {
-			return true
-		}
-	}
-	return false
-}
-
-func scanRepository(repoPath string, config Config) {
-	repo, err := git.PlainOpen(repoPath)
-	if err != nil {
-		fmt.Printf("Error opening repository: %v\n", err)
-		os.Exit(1)
-	}
-
-	iter, err := repo.Log(&git.LogOptions{})
-	if err != nil {
-		fmt.Printf("Error getting logs: %v\n", err)
-		os.Exit(1)
-	}
-
+func scanDirectory(dirPath string, config Config) {
 	var matches []string
 
-	err = iter.ForEach(func(c *object.Commit) error {
-		files, err := c.Files()
+	err := filepath.WalkDir(dirPath, func(path string, info os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		err = files.ForEach(func(f *object.File) error {
-			if shouldIgnore(f.Name, config) {
-				return nil
-			}
+		if info.IsDir() || strings.HasSuffix(info.Name(), ".env") {
+			return nil
+		}
 
-			content, err := f.Contents()
-			if err != nil {
-				return err
-			}
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
 
-			scanner := bufio.NewScanner(strings.NewReader(content))
-			for scanner.Scan() {
-				line := scanner.Text()
-				for _, rule := range config.Rules {
-					re := regexp.MustCompile(rule.Regex)
-					if re.MatchString(line) {
-						matches = append(matches, fmt.Sprintf("Match found in commit %s, file %s: %s", c.Hash, f.Name, line))
-					}
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			for _, rule := range config.Rules {
+				re := regexp.MustCompile(rule.Regex)
+				if re.MatchString(line) {
+					matches = append(matches, fmt.Sprintf("Match found in file %s: %s", path, line))
 				}
 			}
+		}
 
-			return scanner.Err()
-		})
+		if err := scanner.Err(); err != nil {
+			return err
+		}
 
-		return err
+		return nil
 	})
 
 	if err != nil {
-		fmt.Printf("Error scanning commits: %v\n", err)
+		fmt.Printf("Error scanning directory: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -145,7 +117,7 @@ func scanRepository(repoPath string, config Config) {
 		generateReport(matches, "json")
 
 		if discordWebhookURL != "" {
-			err := sendDiscordNotification(discordWebhookURL, "Secrets found in repository")
+			err := sendDiscordNotification(discordWebhookURL, "Secrets found in directory")
 			if err != nil {
 				fmt.Printf("Error sending Discord notification: %v\n", err)
 			}
