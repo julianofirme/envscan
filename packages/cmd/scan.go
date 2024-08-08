@@ -142,11 +142,15 @@ func scanDirectory(dirPath string, cfg config.Config) {
 		defer file.Close()
 
 		scanner := bufio.NewScanner(file)
+		var rules []*regexp.Regexp
+		for _, rule := range cfg.Rules {
+			re := regexp.MustCompile(rule.Regex)
+			rules = append(rules, re)
+		}
 		for scanner.Scan() {
 			line := scanner.Text()
-			for _, rule := range cfg.Rules {
-				re := regexp.MustCompile(rule.Regex)
-				if re.MatchString(line) {
+			for _, rule := range rules {
+				if rule.MatchString(line) {
 					matches = append(matches, fmt.Sprintf("Potential secret found in file %s: %s", path, line))
 				}
 			}
