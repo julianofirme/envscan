@@ -3,10 +3,13 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"envscan/packages/config"
 	"envscan/packages/notify"
@@ -38,6 +41,11 @@ func init() {
 	rootCmd.AddCommand(scanCmd)
 	scanCmd.Flags().StringVarP(&configFile, "config", "c", "rules.toml", "Path to the configuration file")
 	scanCmd.Flags().StringVarP(&discordWebhookURL, "discord-webhook", "d", "", "Discord Webhook URL for notifications")
+}
+
+func trackTime(start time.Time, name string) {
+	elapsed := time.Since(start)
+	fmt.Printf("%s took %s\n", name, elapsed)
 }
 
 func parseGitignore(dirPath string) ([]string, error) {
@@ -96,36 +104,51 @@ func shouldIgnore(path string, dirPath string, patterns []string) bool {
 	return false
 }
 
-func scanDirectory(dirPath string, cfg config.Config) {
-	var matches []string
-	var fileCount int
+func readFileAndScan(path string, rules []*regexp.Regexp, matches chan<- string, wg *sync.WaitGroup, bar *progressbar.ProgressBar) {
+	defer wg.Done()
 
+	file, err := os.Open(path)
+	if err != nil {
+		fmt.Printf("Error opening file %s: %v\n", path, err)
+		return
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err != io.EOF {
+				fmt.Printf("Error reading file %s: %v\n", path, err)
+			}
+			break
+		}
+		processLine(path, line, rules, matches, bar)
+	}
+
+	bar.Add(1) // Increment after processing the file
+}
+
+func processLine(path string, line []byte, rules []*regexp.Regexp, matches chan<- string, bar *progressbar.ProgressBar) {
+	for _, rule := range rules {
+		if rule.Match(line) {
+			matches <- fmt.Sprintf("Potential secret found in file %s: %s", path, line)
+		}
+	}
+	bar.Add(1)
+}
+
+func scanDirectory(dirPath string, cfg config.Config) {
+	defer trackTime(time.Now(), "scanDirectory")
+
+	var totalLines int
 	patterns, err := parseGitignore(dirPath)
 	if err != nil {
 		fmt.Printf("Error reading .gitignore: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Count total files for progress bar
-	err = filepath.WalkDir(dirPath, func(path string, info os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && !strings.HasSuffix(info.Name(), ".env") && !shouldIgnore(path, dirPath, patterns) {
-			fileCount++
-		}
-		return nil
-	})
-
-	if err != nil {
-		fmt.Printf("Error counting files: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Initialize progress bar
-	bar := progressbar.Default(int64(fileCount), "Scanning")
-
-	// Scan files with progress bar
+	// Count total lines across all files
 	err = filepath.WalkDir(dirPath, func(path string, info os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -141,26 +164,55 @@ func scanDirectory(dirPath string, cfg config.Config) {
 		}
 		defer file.Close()
 
-		scanner := bufio.NewScanner(file)
-		var rules []*regexp.Regexp
-		for _, rule := range cfg.Rules {
-			re := regexp.MustCompile(rule.Regex)
-			rules = append(rules, re)
-		}
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			for _, rule := range rules {
-				if rule.Match(line) {
-					matches = append(matches, fmt.Sprintf("Potential secret found in file %s: %s", path, line))
+		scanner := bufio.NewReader(file)
+		for {
+			_, err := scanner.ReadBytes('\n')
+			if err != nil {
+				if err != io.EOF {
+					fmt.Printf("Error reading file %s: %v\n", path, err)
 				}
+				break
 			}
+
+			totalLines++
 		}
 
-		if err := scanner.Err(); err != nil {
+		return err
+	})
+
+	if err != nil {
+		fmt.Printf("Error counting lines: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize progress bar with total lines
+	bar := progressbar.Default(int64(totalLines), "Scanning")
+
+	var rules []*regexp.Regexp
+	for _, rule := range cfg.Rules {
+		re := regexp.MustCompile(rule.Regex)
+		rules = append(rules, re)
+	}
+
+	// Channel to collect matches
+	matches := make(chan string)
+
+	// WaitGroup to wait for all goroutines to finish
+	var wg sync.WaitGroup
+
+	// Start goroutines to scan files
+	err = filepath.WalkDir(dirPath, func(path string, info os.DirEntry, err error) error {
+		if err != nil {
 			return err
 		}
 
-		bar.Add(1)
+		if info.IsDir() || strings.HasSuffix(info.Name(), ".env") || shouldIgnore(path, dirPath, patterns) {
+			return nil
+		}
+
+		wg.Add(1)
+		go readFileAndScan(path, rules, matches, &wg, bar)
+
 		return nil
 	})
 
@@ -169,14 +221,26 @@ func scanDirectory(dirPath string, cfg config.Config) {
 		os.Exit(1)
 	}
 
+	// Close the matches channel once all goroutines are done
+	go func() {
+		wg.Wait()
+		close(matches)
+	}()
+
+	// Collect and print matches
+	var allMatches []string
+	for match := range matches {
+		allMatches = append(allMatches, match)
+	}
+
 	fmt.Println() // Ensure newline after progress bar
 
-	if len(matches) > 0 {
+	if len(allMatches) > 0 {
 		fmt.Println("Potential secrets found:")
-		for _, match := range matches {
+		for _, match := range allMatches {
 			fmt.Println(match)
 		}
-		report.GenerateReport(matches, "json")
+		report.GenerateReport(allMatches, "json")
 
 		if discordWebhookURL != "" {
 			err := notify.SendDiscordNotification(discordWebhookURL, "Secrets found in directory")
