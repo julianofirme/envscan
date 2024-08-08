@@ -40,16 +40,78 @@ func init() {
 	scanCmd.Flags().StringVarP(&discordWebhookURL, "discord-webhook", "d", "", "Discord Webhook URL for notifications")
 }
 
+func parseGitignore(dirPath string) ([]string, error) {
+	var patterns []string
+	gitignorePath := filepath.Join(dirPath, ".gitignore")
+
+	file, err := os.Open(gitignorePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return patterns, nil
+		}
+		return nil, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns = append(patterns, line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return patterns, nil
+}
+
+func shouldIgnore(path string, dirPath string, patterns []string) bool {
+	relativePath, err := filepath.Rel(dirPath, path)
+	if err != nil {
+		fmt.Printf("Error getting relative path: %v\n", err)
+		return false
+	}
+
+	for _, pattern := range patterns {
+		if strings.HasSuffix(pattern, "/") {
+			if strings.HasPrefix(relativePath, strings.TrimSuffix(pattern, "/")) {
+				return true
+			}
+		} else if matched, _ := filepath.Match(pattern, relativePath); matched {
+			return true
+		} else if strings.Contains(pattern, "*") {
+			matched, _ := filepath.Match(pattern, relativePath)
+			if matched {
+				return true
+			}
+		} else if strings.HasPrefix(relativePath, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func scanDirectory(dirPath string, cfg config.Config) {
 	var matches []string
 	var fileCount int
 
+	patterns, err := parseGitignore(dirPath)
+	if err != nil {
+		fmt.Printf("Error reading .gitignore: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Count total files for progress bar
-	err := filepath.WalkDir(dirPath, func(path string, info os.DirEntry, err error) error {
+	err = filepath.WalkDir(dirPath, func(path string, info os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() && !strings.HasSuffix(info.Name(), ".env") {
+		if !info.IsDir() && !strings.HasSuffix(info.Name(), ".env") && !shouldIgnore(path, dirPath, patterns) {
 			fileCount++
 		}
 		return nil
@@ -69,7 +131,7 @@ func scanDirectory(dirPath string, cfg config.Config) {
 			return err
 		}
 
-		if info.IsDir() || strings.HasSuffix(info.Name(), ".env") {
+		if info.IsDir() || strings.HasSuffix(info.Name(), ".env") || shouldIgnore(path, dirPath, patterns) {
 			return nil
 		}
 
