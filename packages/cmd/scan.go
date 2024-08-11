@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,7 +31,7 @@ var scanCmd = &cobra.Command{
 		dirPath := args[0]
 		cfg, err := config.LoadConfig(configFile)
 		if err != nil {
-			fmt.Printf("Error loading config: %v\n", err)
+			log.Printf("Error loading config: %v\n", err)
 			os.Exit(1)
 		}
 		scanDirectory(dirPath, cfg)
@@ -45,7 +46,7 @@ func init() {
 
 func trackTime(start time.Time, name string) {
 	elapsed := time.Since(start)
-	fmt.Printf("%s took %s\n", name, elapsed)
+	log.Printf("%s took %s\n", name, elapsed)
 }
 
 func parseGitignore(dirPath string) ([]string, error) {
@@ -80,7 +81,7 @@ func parseGitignore(dirPath string) ([]string, error) {
 func shouldIgnore(path string, dirPath string, patterns []string) bool {
 	relativePath, err := filepath.Rel(dirPath, path)
 	if err != nil {
-		fmt.Printf("Error getting relative path: %v\n", err)
+		log.Printf("Error getting relative path: %v\n", err)
 		return false
 	}
 
@@ -98,6 +99,27 @@ func shouldIgnore(path string, dirPath string, patterns []string) bool {
 			}
 		} else if strings.HasPrefix(relativePath, pattern) {
 			return true
+		} else if strings.HasPrefix(pattern, "/") {
+			trimPath := strings.TrimPrefix(pattern, "/")
+
+			ok := strings.Contains(relativePath, trimPath)
+			return ok
+		} else if strings.HasPrefix(pattern, ".") {
+			trimPath := strings.TrimPrefix(pattern, ".")
+
+			ok := strings.Contains(relativePath, trimPath)
+			log.Printf("Is ok: %s\n", err)
+			log.Printf("relativePath: %s\n", relativePath)
+			log.Printf("Trim path: %s\n", trimPath)
+			return ok
+		} else if strings.HasPrefix(pattern, "/.") {
+			trimPath := strings.TrimPrefix(pattern, "/.")
+
+			ok := strings.Contains(relativePath, trimPath)
+			log.Printf("Is ok: %s\n", err)
+			log.Printf("relativePath: %s\n", relativePath)
+			log.Printf("Trim path: %s\n", trimPath)
+			return ok
 		}
 	}
 
@@ -109,7 +131,7 @@ func readFileAndScan(path string, rules []*regexp.Regexp, matches chan<- string,
 
 	file, err := os.Open(path)
 	if err != nil {
-		fmt.Printf("Error opening file %s: %v\n", path, err)
+		log.Printf("Error opening file %s: %v\n", path, err)
 		return
 	}
 	defer file.Close()
@@ -119,7 +141,7 @@ func readFileAndScan(path string, rules []*regexp.Regexp, matches chan<- string,
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
 			if err != io.EOF {
-				fmt.Printf("Error reading file %s: %v\n", path, err)
+				log.Printf("Error reading file %s: %v\n", path, err)
 			}
 			break
 		}
@@ -144,7 +166,7 @@ func scanDirectory(dirPath string, cfg config.Config) {
 	var totalLines int
 	patterns, err := parseGitignore(dirPath)
 	if err != nil {
-		fmt.Printf("Error reading .gitignore: %v\n", err)
+		log.Printf("Error reading .gitignore: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -169,7 +191,7 @@ func scanDirectory(dirPath string, cfg config.Config) {
 			_, err := scanner.ReadBytes('\n')
 			if err != nil {
 				if err != io.EOF {
-					fmt.Printf("Error reading file %s: %v\n", path, err)
+					log.Printf("Error reading file %s: %v\n", path, err)
 				}
 				break
 			}
@@ -181,7 +203,7 @@ func scanDirectory(dirPath string, cfg config.Config) {
 	})
 
 	if err != nil {
-		fmt.Printf("Error counting lines: %v\n", err)
+		log.Printf("Error counting lines: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -217,7 +239,7 @@ func scanDirectory(dirPath string, cfg config.Config) {
 	})
 
 	if err != nil {
-		fmt.Printf("Error scanning directory: %v\n", err)
+		log.Printf("Error scanning directory: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -233,24 +255,24 @@ func scanDirectory(dirPath string, cfg config.Config) {
 		allMatches = append(allMatches, match)
 	}
 
-	fmt.Println() // Ensure newline after progress bar
+	log.Println() // Ensure newline after progress bar
 
 	if len(allMatches) > 0 {
-		fmt.Println("Potential secrets found:")
+		log.Println("Potential secrets found:")
 		for _, match := range allMatches {
-			fmt.Println(match)
+			log.Println(match)
 		}
 		report.GenerateReport(allMatches, "json")
 
 		if discordWebhookURL != "" {
 			err := notify.SendDiscordNotification(discordWebhookURL, "Secrets found in directory")
 			if err != nil {
-				fmt.Printf("Error sending Discord notification: %v\n", err)
+				log.Printf("Error sending Discord notification: %v\n", err)
 			}
 		}
 
 		os.Exit(1)
 	} else {
-		fmt.Println("No secrets found")
+		log.Println("No secrets found")
 	}
 }
