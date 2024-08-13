@@ -152,6 +152,24 @@ func readFileAndScan(path string, rules []*regexp.Regexp, matches chan<- string,
 }
 
 func processLine(path string, line []byte, rules []*regexp.Regexp, matches chan<- string, bar *progressbar.ProgressBar) {
+	exclusions := []*regexp.Regexp{
+		regexp.MustCompile(`process\.env\.`),      // JavaScript/Node.js
+		regexp.MustCompile(`os\.environ\['`),      // Python
+		regexp.MustCompile(`ENV\['`),              // Ruby
+		regexp.MustCompile(`System\.getenv\(`),    // Java
+		regexp.MustCompile(`getenv\(`),            // C/C++
+		regexp.MustCompile(`\$ENV\{`),             // Perl
+		regexp.MustCompile(`System\.Environment`), // C#
+		regexp.MustCompile(`dotenv\.`),            // Dotenv libraries
+		regexp.MustCompile(`config\.`),            // Generic config access
+	}
+
+	for _, exclusion := range exclusions {
+		if exclusion.Match(line) {
+			return
+		}
+	}
+
 	for _, rule := range rules {
 		if rule.Match(line) {
 			matches <- fmt.Sprintf("Potential secret found in file %s: %s", path, line)
