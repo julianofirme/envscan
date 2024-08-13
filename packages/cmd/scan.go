@@ -14,7 +14,6 @@ import (
 
 	"envscan/packages/config"
 	"envscan/packages/notify"
-	"envscan/packages/report"
 
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
@@ -108,17 +107,11 @@ func shouldIgnore(path string, dirPath string, patterns []string) bool {
 			trimPath := strings.TrimPrefix(pattern, ".")
 
 			ok := strings.Contains(relativePath, trimPath)
-			log.Printf("Is ok: %s\n", err)
-			log.Printf("relativePath: %s\n", relativePath)
-			log.Printf("Trim path: %s\n", trimPath)
 			return ok
 		} else if strings.HasPrefix(pattern, "/.") {
 			trimPath := strings.TrimPrefix(pattern, "/.")
 
 			ok := strings.Contains(relativePath, trimPath)
-			log.Printf("Is ok: %s\n", err)
-			log.Printf("relativePath: %s\n", relativePath)
-			log.Printf("Trim path: %s\n", trimPath)
 			return ok
 		}
 	}
@@ -179,7 +172,6 @@ func processLine(path string, line []byte, rules []*regexp.Regexp, matches chan<
 }
 
 func scanDirectory(dirPath string, cfg config.Config) {
-	defer trackTime(time.Now(), "scanDirectory")
 
 	var totalLines int
 	patterns, err := parseGitignore(dirPath)
@@ -280,7 +272,6 @@ func scanDirectory(dirPath string, cfg config.Config) {
 		for _, match := range allMatches {
 			log.Println(match)
 		}
-		report.GenerateReport(allMatches, "json")
 
 		if discordWebhookURL != "" {
 			err := notify.SendDiscordNotification(discordWebhookURL, "Secrets found in directory")
