@@ -51,7 +51,6 @@ envscan scan /path/to/your/repository -c /path/to/secrets.toml
 
 #### Scan Modes
 - `scan`: Full repository scan
-- `staged`: Scan only staged files
 - `changed`: Scan modified files
 
 #### Flags
