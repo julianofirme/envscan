@@ -20,9 +20,7 @@ import (
 )
 
 var configFile string
-var failFast bool
 var showProgress bool
-var followSymlinks bool
 
 var changedFilesCmd = &cobra.Command{
 	Use:   "changed",
@@ -50,9 +48,7 @@ var changedFilesCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(changedFilesCmd)
 	changedFilesCmd.Flags().StringVarP(&configFile, "config", "c", "secrets.toml", "Path to the configuration file")
-	changedFilesCmd.Flags().BoolVar(&failFast, "fail-fast", false, "Exit immediately on first error")
 	changedFilesCmd.Flags().BoolVar(&showProgress, "no-progress", true, "Show progress bar")
-	changedFilesCmd.Flags().BoolVar(&followSymlinks, "follow-symlinks", true, "Follow symbolic links")
 }
 
 // Helper function to get the root directory of the git repository
