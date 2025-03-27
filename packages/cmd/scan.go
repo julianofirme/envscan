@@ -26,7 +26,6 @@ var failFast bool
 var showProgress bool
 var followSymlinks bool
 
-// checkCmd defines the "check" command for scanning staged or changed files
 var checkCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Check staged files or a commit range for secrets",
