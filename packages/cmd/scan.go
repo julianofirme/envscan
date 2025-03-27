@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes" // Added for bytes.IndexByte
 	"fmt"
 	"io"
 	"log"
@@ -16,9 +17,14 @@ import (
 
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
+	ignore "github.com/sabhiram/go-gitignore" 
 )
 
+// Package-level variables
 var configFile string
+var failFast bool
+var showProgress bool
+var followSymlinks bool
 
 var scanCmd = &cobra.Command{
 	Use:   "run [directory]",
@@ -28,7 +34,7 @@ var scanCmd = &cobra.Command{
 		dirPath := args[0]
 		cfg, err := config.LoadConfig(configFile)
 		if err != nil {
-			log.Printf("Error loading config: %v\n", err)
+			log.Printf("Error loading config %s: %v. Try specifying a valid TOML file with --config.", configFile, err)
 			os.Exit(1)
 		}
 		scanDirectory(dirPath, cfg)
@@ -38,6 +44,9 @@ var scanCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(scanCmd)
 	scanCmd.Flags().StringVarP(&configFile, "config", "c", "rules.toml", "Path to the configuration file")
+	scanCmd.Flags().BoolVar(&failFast, "fail-fast", false, "Exit immediately on first error")
+	scanCmd.Flags().BoolVar(&showProgress, "no-progress", true, "Show progress bar")
+	scanCmd.Flags().BoolVar(&followSymlinks, "follow-symlinks", true, "Follow symbolic links")
 }
 
 func trackTime(start time.Time, name string) {
@@ -45,113 +54,80 @@ func trackTime(start time.Time, name string) {
 	log.Printf("%s took %s\n", name, elapsed)
 }
 
-func parseGitignore(dirPath string) ([]string, error) {
-	var patterns []string
+func parseGitignore(dirPath string) (*ignore.GitIgnore, error) {
 	gitignorePath := filepath.Join(dirPath, ".gitignore")
-
-	file, err := os.Open(gitignorePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return patterns, nil
-		}
-		return nil, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		patterns = append(patterns, line)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	return patterns, nil
+	return ignore.CompileIgnoreFile(gitignorePath)
 }
 
-func shouldIgnore(path string, dirPath string, patterns []string) bool {
-	relativePath, err := filepath.Rel(dirPath, path)
-	if err != nil {
-		log.Printf("Error getting relative path: %v\n", err)
+func shouldIgnore(path string, dirPath string, gi *ignore.GitIgnore) bool {
+	if gi == nil {
 		return false
 	}
-
-	for _, pattern := range patterns {
-		if strings.HasSuffix(pattern, "/") {
-			if strings.HasPrefix(relativePath, strings.TrimSuffix(pattern, "/")) {
-				return true
-			}
-		} else if matched, _ := filepath.Match(pattern, relativePath); matched {
-			return true
-		} else if strings.Contains(pattern, "*") {
-			matched, _ := filepath.Match(pattern, relativePath)
-			if matched {
-				return true
-			}
-		} else if strings.HasPrefix(relativePath, pattern) {
-			return true
-		} else if strings.HasPrefix(pattern, "/") {
-			trimPath := strings.TrimPrefix(pattern, "/")
-
-			ok := strings.Contains(relativePath, trimPath)
-			return ok
-		} else if strings.HasPrefix(pattern, ".") {
-			trimPath := strings.TrimPrefix(pattern, ".")
-
-			ok := strings.Contains(relativePath, trimPath)
-			return ok
-		} else if strings.HasPrefix(pattern, "/.") {
-			trimPath := strings.TrimPrefix(pattern, "/.")
-
-			ok := strings.Contains(relativePath, trimPath)
-			return ok
-		}
-	}
-
-	return false
+	relPath, _ := filepath.Rel(dirPath, path)
+	return gi.MatchesPath(relPath)
 }
 
 func readFileAndScan(path string, rules []*regexp.Regexp, matches chan<- string, wg *sync.WaitGroup, bar *progressbar.ProgressBar) {
 	defer wg.Done()
 
+	// Open the file
 	file, err := os.Open(path)
 	if err != nil {
-		log.Printf("Error opening file %s: %v\n", path, err)
-		return
+			log.Printf("Error opening file %s: %v", path, err)
+			return
 	}
 	defer file.Close()
 
-	reader := bufio.NewReader(file)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("Error reading file %s: %v\n", path, err)
-			}
-			break
-		}
-		processLine(path, line, rules, matches, bar)
+	// Check if the file is binary
+	if isBinaryFile(file) {
+			return
 	}
 
-	bar.Add(1) // Increment after processing the file
+	// Reset file pointer to the beginning after checking
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+			log.Printf("Error seeking file %s: %v", path, err)
+			return
+	}
+
+	// Proceed with reading the file line by line
+	reader := bufio.NewReader(file)
+	for {
+			line, err := reader.ReadBytes('\n')
+			if err != nil {
+					if err != io.EOF {
+							log.Printf("Error reading file %s: %v", path, err)
+					}
+					break
+			}
+			processLine(path, line, rules, matches, bar)
+	}
+
+	bar.Add(1)
+}
+
+func isBinaryFile(file *os.File) bool {
+	const checkSize = 8000
+	buf := make([]byte, checkSize)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+			log.Printf("Error reading file %s: %v", file.Name(), err)
+			return false
+	}
+	return bytes.IndexByte(buf[:n], 0) != -1 
 }
 
 func processLine(path string, line []byte, rules []*regexp.Regexp, matches chan<- string, bar *progressbar.ProgressBar) {
 	exclusions := []*regexp.Regexp{
-		regexp.MustCompile(`process\.env\.`),      // JavaScript/Node.js
-		regexp.MustCompile(`os\.environ\['`),      // Python
-		regexp.MustCompile(`ENV\['`),              // Ruby
-		regexp.MustCompile(`System\.getenv\(`),    // Java
-		regexp.MustCompile(`getenv\(`),            // C/C++
-		regexp.MustCompile(`\$ENV\{`),             // Perl
-		regexp.MustCompile(`System\.Environment`), // C#
-		regexp.MustCompile(`dotenv\.`),            // Dotenv libraries
-		regexp.MustCompile(`config\.`),            // Generic config access
+		regexp.MustCompile(`process\.env\.`),
+		regexp.MustCompile(`os\.environ\['`),
+		regexp.MustCompile(`ENV\['`),
+		regexp.MustCompile(`System\.getenv\(`),
+		regexp.MustCompile(`getenv\(`),
+		regexp.MustCompile(`\$ENV\{`),
+		regexp.MustCompile(`System\.Environment`),
+		regexp.MustCompile(`dotenv\.`),
+		regexp.MustCompile(`config\.`),
 	}
 
 	for _, exclusion := range exclusions {
@@ -169,21 +145,23 @@ func processLine(path string, line []byte, rules []*regexp.Regexp, matches chan<
 }
 
 func scanDirectory(dirPath string, cfg config.Config) {
-
 	var totalLines int
-	patterns, err := parseGitignore(dirPath)
+	gi, err := parseGitignore(dirPath) 
 	if err != nil {
 		log.Printf("Error reading .gitignore: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Count total lines across all files
 	err = filepath.WalkDir(dirPath, func(path string, info os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if info.IsDir() || strings.HasSuffix(info.Name(), ".env") || shouldIgnore(path, dirPath, patterns) {
+		if !followSymlinks && info.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+
+		if info.IsDir() || shouldIgnore(path, dirPath, gi) {
 			return nil
 		}
 
@@ -202,7 +180,6 @@ func scanDirectory(dirPath string, cfg config.Config) {
 				}
 				break
 			}
-
 			totalLines++
 		}
 
@@ -214,8 +191,10 @@ func scanDirectory(dirPath string, cfg config.Config) {
 		os.Exit(1)
 	}
 
-	// Initialize progress bar with total lines
-	bar := progressbar.Default(int64(totalLines), "Scanning")
+	var bar *progressbar.ProgressBar
+	if showProgress {
+		bar = progressbar.Default(int64(totalLines), "Scanning")
+	}
 
 	var rules []*regexp.Regexp
 	for _, rule := range cfg.Rules {
@@ -223,19 +202,15 @@ func scanDirectory(dirPath string, cfg config.Config) {
 		rules = append(rules, re)
 	}
 
-	// Channel to collect matches
 	matches := make(chan string)
-
-	// WaitGroup to wait for all goroutines to finish
 	var wg sync.WaitGroup
 
-	// Start goroutines to scan files
 	err = filepath.WalkDir(dirPath, func(path string, info os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if info.IsDir() || strings.HasSuffix(info.Name(), ".env") || shouldIgnore(path, dirPath, patterns) {
+		if info.IsDir() || strings.HasSuffix(info.Name(), ".env") || shouldIgnore(path, dirPath, gi) {
 			return nil
 		}
 
@@ -250,26 +225,23 @@ func scanDirectory(dirPath string, cfg config.Config) {
 		os.Exit(1)
 	}
 
-	// Close the matches channel once all goroutines are done
 	go func() {
 		wg.Wait()
 		close(matches)
 	}()
 
-	// Collect and print matches
 	var allMatches []string
 	for match := range matches {
 		allMatches = append(allMatches, match)
 	}
 
-	log.Println() // Ensure newline after progress bar
+	log.Println()
 
 	if len(allMatches) > 0 {
 		log.Println("Potential secrets found:")
 		for _, match := range allMatches {
 			log.Println(match)
 		}
-
 		os.Exit(1)
 	} else {
 		log.Println("No secrets found")
