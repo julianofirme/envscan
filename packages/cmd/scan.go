@@ -13,14 +13,12 @@ import (
 	"time"
 
 	"envscan/packages/config"
-	"envscan/packages/notify"
 
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
 
 var configFile string
-var discordWebhookURL string
 
 var scanCmd = &cobra.Command{
 	Use:   "run [directory]",
@@ -40,7 +38,6 @@ var scanCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(scanCmd)
 	scanCmd.Flags().StringVarP(&configFile, "config", "c", "rules.toml", "Path to the configuration file")
-	scanCmd.Flags().StringVarP(&discordWebhookURL, "discord-webhook", "d", "", "Discord Webhook URL for notifications")
 }
 
 func trackTime(start time.Time, name string) {
@@ -271,13 +268,6 @@ func scanDirectory(dirPath string, cfg config.Config) {
 		log.Println("Potential secrets found:")
 		for _, match := range allMatches {
 			log.Println(match)
-		}
-
-		if discordWebhookURL != "" {
-			err := notify.SendDiscordNotification(discordWebhookURL, "Secrets found in directory")
-			if err != nil {
-				log.Printf("Error sending Discord notification: %v\n", err)
-			}
 		}
 
 		os.Exit(1)
